@@ -1,0 +1,30 @@
+# Ambiente virtuale (fondamentale)
+venv/
+.venv/
+env/
+
+# Cache di Python
+__pycache__/
+*.pyc
+
+# Database e indici vettoriali locali
+chroma_db/
+*.sqlite3
+
+# File con chiavi o segreti
+.env
+
+# File di sistema Mac
+.DS_Store
+
+# Cartelle temporanee di upload / output
+temp/
+outputs/
+
+# Ignora tutti i PDF generici (es. tesi, bozze, slide personali)
+*.pdf
+*.pptx
+
+# MA includi i PDF e documenti della Knowledge Base di unicamente_informatica
+!data/**/*.pdf
+!documents_ui/**/*.pdf

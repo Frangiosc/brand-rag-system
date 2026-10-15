@@ -1,0 +1,132 @@
+{
+  "brand_id": "unicamente_informatica",
+  "brand_name": "University of Camerino - Computer Science Division",
+  "meta": {
+    "project_context": "unicamente_Informatica brand",
+    "target_channels": [
+      "instagram",
+      "linkedin"
+    ]
+  },
+  "visual_identity": {
+    "color_palette": {
+      "primary_colors": [
+        {
+          "name": "Informatica",
+          "hex": "#173983",
+          "semantic_meaning": "Custom color"
+        },
+        {
+          "name": "Informatica per la Comunicazione Digitale",
+          "hex": "#FFCA48",
+          "semantic_meaning": "Custom color"
+        },
+        {
+          "name": "Computer Science",
+          "hex": "#FA7343",
+          "semantic_meaning": "Custom color"
+        },
+        {
+          "name": "Verde",
+          "hex": "#36D980",
+          "semantic_meaning": "Custom color"
+        },
+        {
+          "name": "Nero",
+          "hex": "#131313",
+          "semantic_meaning": "Custom color"
+        },
+        {
+          "name": "Bianco",
+          "hex": "#fffff0",
+          "semantic_meaning": "Custom color"
+        }
+      ],
+      "neutral_colors": [
+        {
+          "name": "Unicam Black",
+          "hex": "#131313",
+          "semantic_meaning": "Primary typography"
+        },
+        {
+          "name": "Unicam White",
+          "hex": "#FFFFF0",
+          "semantic_meaning": "Canvas backgrounds"
+        }
+      ]
+    },
+    "typography": {
+      "heading_font": {
+        "family": "Sora",
+        "allowed_weights": [
+          "Bold"
+        ],
+        "file_name": "Sora-Bold copia.ttf"
+      },
+      "body_font": {
+        "family": "Sora",
+        "allowed_weights": [
+          "Regular"
+        ],
+        "file_name": "Sora-Regular copia.ttf"
+      },
+      "fallback_font": "Helvetica"
+    }
+  },
+  "brand_assets": {
+    "core_branding": {
+      "main_logo": {
+        "file_name": "logo_unicamente.png",
+        "path": "data/assets/logos/logo_unicamente.png",
+        "type": "image/png"
+      }
+    }
+  },
+  "channel_templates": {
+    "instagram": {
+      "handle": "@unicamente_informatica",
+      "formats": {
+        "vertical": {
+          "aspect_ratio": "4:5",
+          "dimensions": "1080x1350",
+          "max_characters": 2200
+        },
+        "square": {
+          "aspect_ratio": "1:1",
+          "dimensions": "1080x1080",
+          "max_characters": 2200
+        },
+        "horizontal": {
+          "aspect_ratio": "1.91:1",
+          "dimensions": "1080x566",
+          "max_characters": 2200
+        },
+        "reels_and_stories": {
+          "aspect_ratio": "9:16",
+          "dimensions": "1080x1920",
+          "max_characters": 2200
+        }
+      }
+    },
+    "linkedin": {
+      "company_page_url": "https://www.linkedin.com/company/informatica-unicam",
+      "formats": {
+        "vertical": {
+          "aspect_ratio": "4:5",
+          "dimensions": "1080x1350",
+          "max_characters": 3000
+        },
+        "square": {
+          "aspect_ratio": "1:1",
+          "dimensions": "1080x1080",
+          "max_characters": 3000
+        },
+        "horizontal": {
+          "aspect_ratio": "1.91:1",
+          "dimensions": "1200x627",
+          "max_characters": 3000
+        }
+      }
+    }
+  }
+}
