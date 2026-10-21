@@ -8,21 +8,23 @@ Il sistema combina un motore di semantic retrieval partizionato (ChromaDB + Hard
 
 ## 🏗️ Architettura del Sistema
 
+```text
 [ Knowledge Base ] -> [ Ingestion & Vector Store (ChromaDB) ]
-|                            |
-v                            v
+       |                            |
+       v                            v
 [ Brand Config JSON ] ---> [ Dynamic Orchestrator ] <--- [ User Prompt ]
-|
-+---------------+---------------+
-|                               |
-v                               v
-[ Qwen 2.5 14B ]               [ Layout Engine ]
-(Copywriting & Context)           (Pillow & SVG Generator)
-|                               |
-+---------------+---------------+
-|
-v
-[ Streamlit UI Interactive Studio ]
+                                    |
+                    +---------------+---------------+
+                    |                               |
+                    v                               v
+           [ Qwen 2.5 14B ]               [ Layout Engine ]
+        (Copywriting & Context)           (Pillow & SVG Generator)
+                    |                               |
+                    +---------------+---------------+
+                                    |
+                                    v
+                     [ Streamlit UI Interactive Studio ]
+```
 
 Il sistema è strutturato su pipeline modulari indipendenti:
 1. **Frontend & Interactive Studio (`Streamlit`)**:
@@ -121,6 +123,8 @@ pytest tests/test_hard_filtering.py tests/test_llm_generation.py tests/test_orch
 ```
 
 ### Struttura del progetto📂
+
+```text
 brand-rag-system/
 ├── app.py                      # Applicazione principale Streamlit (Frontend & State)
 ├── Dockerfile                  # Specifica di containerizzazione per il servizio Web
@@ -138,6 +142,7 @@ brand-rag-system/
 │   └── vector_store.py         # Inizializzazione e gestione ChromaDB
 ├── tests/                      # Suite di test automatizzati (Pytest)
 └── data/                       # Storage locale (Knowledge Base, font e asset di brand)
+```                     # Storage locale (Knowledge Base, font e asset di brand)
 
 ### Licenza e Attribution📄
 Progetto sviluppato per la sezione di Informatica dell'Università di Camerino (UNICAM). Tutti i diritti sui marchi e sui materiali istituzionali appartengono ai rispettivi proprietari.
