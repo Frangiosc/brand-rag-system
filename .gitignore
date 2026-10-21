@@ -28,3 +28,7 @@ outputs/
 # MA includi i PDF e documenti della Knowledge Base di unicamente_informatica
 !data/**/*.pdf
 !documents_ui/**/*.pdf
+
+data/generated/**
+data/vector_store/**
+vector_store/**

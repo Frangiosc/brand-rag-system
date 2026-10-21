@@ -6,7 +6,7 @@ def detect_language(text: str) -> str:
     a meno che il testo non contenga un'esplicita richiesta in inglese.
     """
     text_lower = text.lower()
-    if "in english" in text_lower or "write in english" in text_lower or "english version" in text_lower:
+    if any(phrase in text_lower for phrase in ["in english", "write in english", "english version"]):
         return "INGLESE"
     
     return "ITALIANO"
@@ -15,21 +15,17 @@ def build_system_prompt() -> str:
     return (
         "Sei l'assistente AI ufficiale di UNICAM (Università di Camerino), "
         "un Social Media Manager esperto specializzato nella creazione di copy "
-        "istituzionali e coinvolgenti per i canali digitali dell'ateneo.\n\n"
+        "istituzionali e coinvolgenti per i canali digitali dell'ateneo (@unicamente_informatica).\n\n"
         "REGOLE TASSATIVE PER LA GENERAZIONE DEL COPY:\n"
-        "1. DENOMINAZIONE UFFICIALE: L'ateneo è l' 'Università di Camerino' (o 'UNICAM'). È TASSATIVAMENTE VIETATO usare espressioni errate come 'Politecnico di Camerino'.\n"
-        "2. DIVIETO DI ALLUCINAZIONI E ETICHETTE RIGIDE: Non inventare dati non presenti nel prompt e non usare stringhe come 'Titolo:', 'Corpo:', '[nome]'.\n"
-        "3. INTEGRITÀ E TONO: Adatta il tono al contesto (formale per avvisi e bandi, dinamico per eventi e rubriche)."
-        "4. DIVIETO ASSOLUTO DI ALLUCINAZIONE DI DATE/LUOGHI: Se il post riguarda un articolo, una rubrica o una ricerca e NON menziona un evento con data/ora/aula, NON INVENTARE MAI date, orari, aule o relatori fittizi!\n"
-        "5. INTEGRAZIONE NATURALE DELLA CALL TO ACTION: Integra il link in modo fluido e invitante nel testo (es. 'Leggi l'articolo completo sul nostro portale:', 'Per scoprire tutti i dettagli della ricerca, visita il link:'). Avoid link incollati senza contesto.\n"
-        "6. ZERO ETICHETTE RIGIDE E ZERO PLACEHOLDER: Non usare stringhe come 'Titolo:', 'Corpo:', 'Dettagli:', '[nome relatore]' o parentesi quadre.\n"
-        "7. ADATTAMENTO DEL TONO:\n"
+        "1. DENOMINAZIONE UFFICIALE: L'ateneo è l''Università di Camerino' (o 'UNICAM'). È TASSATIVAMENTE VIETATO usare espressioni errate come 'Politecnico di Camerino'.\n"
+        "2. DIVIETO ASSOLUTO DI ALLUCINAZIONI: Non inventare mai date, orari, aule, scadenze o relatori fittizi se non sono presenti nella richiesta dell'utente.\n"
+        "3. ZERO ETICHETTE TECNICHE E PLACEHOLDER: Non usare stringhe come 'Titolo:', 'Corpo:', 'Dettagli:', '[nome relatore]' o parentesi quadre. Scrivi direttamente il copy pronto da pubblicare.\n"
+        "4. REGISTRO E TONO DI VOCE:\n"
         "   - Per RICERCA / INNOVAZIONE / RUBRICHE: Tono entusiasta, divulgativo, autorevole ed elegante.\n"
-        "   - Per AVVISI / TASSE: Tono formale ed istituzionale.\n"
-        "8. USO MODERATO DI EMOJI: Max 2-3 emoji tematiche e pertinenti.\n"
-        "9. HASHTAG: Inserisci max 3-4 hashtag pertinenti in fondo al post."
-        "10. CALL TO ACTION E LINK: Introduci il link in modo chiaro e visivamente distinto "
-        "(es. '👉 Leggi l'estratto dell'articolo completo sul nostro portale:' oppure '🔗 Consulta la pubblicazione al link:')."
+        "   - Per AVVISI / BANDI / TASSE / PROCEDURE: Tono formale, chiaro, rassicurante ed istituzionale.\n"
+        "5. CALL TO ACTION E LINK: Se è presente un link web, introducilo in modo fluido e visivamente distinto "
+        "(es. '👉 Scopri tutti i dettagli al link:', '🔗 Consulta la procedura sul portale:'). Non incollare URL nudi senza contesto.\n"
+        "6. EMOJI E HASHTAG: Uso moderato di emoji pertinenti (max 2-3). Concludi il post con 3-4 hashtag istituzionali rilevanti (es. #UNICAM #InformaticaUNICAM)."
     )
 
 def assemble_final_prompt(
@@ -41,23 +37,28 @@ def assemble_final_prompt(
 ) -> str:
     detected_lang = detect_language(user_query)
     
-    formats = channel_constraints.get("formats", {})
-    formats_specification = ""
-    unique_limits = set()
-    
-    for format_name, details in formats.items():
-        if isinstance(details, dict):
-            if "aspect_ratio" in details:
-                char_limit = details.get("max_characters", "N/D")
-                if char_limit != "N/D":
-                    unique_limits.add(str(char_limit))
-                
+    # Rilevamento flessibile dei vincoli di formato (singolo formato o dict multi-formato)
+    if "max_characters" in channel_constraints or "aspect_ratio" in channel_constraints:
+        char_limit = channel_constraints.get("max_characters", 2200)
+        aspect_ratio = channel_constraints.get("aspect_ratio", "N/D")
+        dimensions = channel_constraints.get("dimensions", "1080x1350")
+        formats_specification = f"- Formato attivo: Aspect Ratio {aspect_ratio} ({dimensions}) | Limite caratteri: {char_limit}\n"
+        max_chars = f"Fino a {char_limit}"
+    else:
+        formats = channel_constraints.get("formats", {})
+        formats_specification = ""
+        unique_limits = set()
+        for format_name, details in formats.items():
+            if isinstance(details, dict):
+                c_lim = details.get("max_characters", "N/D")
+                if c_lim != "N/D":
+                    unique_limits.add(str(c_lim))
                 formats_specification += (
                     f"- Formato '{format_name}': Aspect Ratio {details.get('aspect_ratio')} "
-                    f"({details.get('dimensions')}) | Limite caratteri: {char_limit}\n"
+                    f"({details.get('dimensions')}) | Limite caratteri: {c_lim}\n"
                 )
+        max_chars = " / ".join(unique_limits) if unique_limits else "Standard (max 2200)"
 
-    max_chars = " / ".join(unique_limits) if unique_limits else "Non specificato"
     few_shot_section = few_shot_context if few_shot_context.strip() else "Nessun esempio specifico fornito. Mantieni un layout editoriale pulito e istituzionale."
 
     final_prompt = f"""=== CONFIGURAZIONE OUTPUT ===
@@ -71,8 +72,8 @@ def assemble_final_prompt(
 
 === VINCOLI GEOMETRICI E DI CANALE ===
 - Canale di destinazione: {channel_name.upper()}
-- Limite caratteri generico rilevato: {max_chars} caratteri
-- Specifiche grafiche e formati consigliati:
+- Limite caratteri: {max_chars} caratteri
+- Specifiche grafiche:
 {formats_specification}
 
 === ISTRUZIONE OPERATIVA DELL'UTENTE ===
@@ -82,9 +83,8 @@ Query: {user_query}
 Genera esclusivamente il testo del post pronto per la pubblicazione su {channel_name.upper()} in lingua {detected_lang}.
 
 DIVIETI TASSATIVI:
-1. NON INSERIRE ETICHETTE TECNICHE come 'Titolo:', 'Corpo del post:', 'Dettagli chiave:', 'Call to Action:', 'Hashtag:'.
-2. NON INSERIRE PLACEHOLDER come '[Specificare data]' o '[Inserire ora]'.
-3. Scrivi un testo unico, fluido, suddiviso solo da a capo naturali.
-4. Se l'avviso riguarda tasse o adempimenti, usa un tono formale, chiaro ed istituzionale.
+1. NON INSERIRE ETICHETTE TECNICHE come 'Titolo:', 'Corpo del post:', 'Hashtag:'.
+2. NON INSERIRE PLACEHOLDER come '[Specificare data]' o '[Inserire link]'.
+3. Scrivi un testo unico, fluido, suddiviso solo da paragrafi naturali.
 """
     return final_prompt

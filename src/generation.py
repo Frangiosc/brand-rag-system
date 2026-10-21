@@ -6,7 +6,7 @@ from typing import Dict, Any, Optional
 # Default a localhost:11434 per esecuzione nativa; sovrascritto da docker-compose in container
 OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434").rstrip("/")
 OLLAMA_API_URL = f"{OLLAMA_HOST}/api/generate"
-DEFAULT_MODEL = "llama3"
+DEFAULT_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5:14b")
 
 def generate_social_post(
     system_prompt: str,
@@ -18,11 +18,11 @@ def generate_social_post(
     current_host = os.getenv("OLLAMA_HOST", "http://localhost:11434").rstrip("/")
     target_api_url = api_url if api_url else f"{current_host}/api/generate"
 
-    full_prompt = f"<<SYS>>\n{system_prompt}\n<</SYS>>\n\n{user_prompt}"
-    
+    # Con il parametro "system", Ollama applica automaticamente i tag corretti (ChatML per Qwen)
     payload = {
         "model": model_name,
-        "prompt": full_prompt,
+        "prompt": user_prompt,
+        "system": system_prompt,
         "options": {
             "temperature": temperature,
             "top_p": 0.9,

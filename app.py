@@ -486,9 +486,8 @@ Funnel Stages desiderati: {', '.join(funnel_stage_select)}
 Genera 3 idee di contenuti originali, chiare e immediatamente operative per il team Social Media.
 """
                         ideas_output = generate_social_post(
-                            system_prompt=brainstorm_system_prompt,
-                            user_prompt=final_brainstorm_prompt,
-                            model_name="llama3"
+                        system_prompt=brainstorm_system_prompt,
+                        user_prompt=final_brainstorm_prompt
                         )
 
                         st.success("✨ Strategic content ideas generated successfully!")
@@ -665,9 +664,8 @@ Catalogo semantico Asset Visivi:
 Rispondi ESCLUSIVAMENTE con il JSON valido.
 """
                             raw_extracted = generate_social_post(
-                                system_prompt="Sei un parser JSON rigoroso ed oggettivo in lingua italiana.", 
-                                user_prompt=extraction_prompt, 
-                                model_name="llama3"
+                            system_prompt="Sei un parser JSON rigoroso ed oggettivo in lingua italiana.", 
+                            user_prompt=extraction_prompt
                             )
                             
                             try:
@@ -965,9 +963,11 @@ Rispondi ESCLUSIVAMENTE con il JSON valido.
                                 channel_name=selected_channel,
                                 channel_constraints=format_details
                             )
+                            
                             raw_post = generate_social_post(
-                                system_prompt=system_prompt, user_prompt=final_user_prompt, model_name="llama3"
-                            )
+                            system_prompt=system_prompt, 
+                            user_prompt=final_user_prompt
+                        )
                             post_generato = clean_generated_post(raw_post)
 
                             course_type = "Informatica"
@@ -1180,10 +1180,9 @@ Rispondi con un SINGOLO oggetto JSON valido:
 }}
 """
                             raw_reply = generate_social_post(
-                                system_prompt="Rispondi ESCLUSIVAMENTE con un JSON valido ben formato. Non aggiungere commenti discorsivi.",
-                                user_prompt=refinement_prompt,
-                                model_name="llama3"
-                            )
+                            system_prompt="Rispondi ESCLUSIVAMENTE con un JSON valido ben formato. Non aggiungere commenti discorsivi.",
+                            user_prompt=refinement_prompt
+                        )
 
                             parsed_reply = None
                             try:
