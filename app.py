@@ -4,242 +4,18 @@ import json
 import re
 import unicodedata
 import random
-from PIL import Image, ImageDraw, ImageFont
+import cairosvg
+from PIL import Image
 
 # Backend core imports
 from src.ingestion import run_semantic_ingestion
 from src.vector_store import initialize_vector_store
 from src.orchestrator import retrieve_brand_context
-from src.brand_config_loader import load_brand_configuration, get_channel_templates
+from src.brand_config_loader import load_brand_configuration
 from src.prompt_builder import build_system_prompt, assemble_final_prompt
 from src.generation import generate_social_post
 from src.post_processor import clean_generated_post
-from src.image_generation import generate_brand_background
 from src.svg_export import generate_brand_svg
-
-# --- RENDERING GRAFICO PROGRAMMATICO (INLINE) ---
-def get_font(font_path: str, size: int):
-    try:
-        if font_path and os.path.exists(font_path):
-            return ImageFont.truetype(font_path, size)
-    except Exception:
-        pass
-    return ImageFont.load_default()
-
-def wrap_text(text: str, max_chars: int = 26) -> list:
-    if not text:
-        return []
-    words = text.split()
-    lines = []
-    current_line = []
-    current_len = 0
-    for w in words:
-        if current_len + len(w) + (1 if current_line else 0) <= max_chars:
-            current_line.append(w)
-            current_len += len(w) + (1 if len(current_line) > 1 else 0)
-        else:
-            if current_line:
-                lines.append(" ".join(current_line))
-            current_line = [w]
-            current_len = len(w)
-    if current_line:
-        lines.append(" ".join(current_line))
-    return lines
-
-def compose_final_graphic(
-    background_img=None,
-    text_content: dict = None,
-    channel_name: str = "instagram",
-    brand_config: dict = None,
-    canvas_size: tuple = (1080, 1350)
-):
-    width, height = canvas_size
-    text_content = text_content or {}
-    brand_config = brand_config or {}
-
-    root_dir = os.path.dirname(os.path.abspath(__file__))
-    assets_dir = os.path.join(root_dir, "data", "assets")
-
-    # 1. Palette per Corso di Laurea
-    course_type = text_content.get("course_type", "Informatica").lower()
-    if "comunicazione" in course_type or "icd" in course_type:
-        bg_color = (255, 202, 72)
-        text_primary = (23, 57, 131)
-        accent_color = (23, 57, 131)
-        btn_bg = (23, 57, 131)
-        btn_text = (255, 255, 255)
-    elif "computer science" in course_type or "magistrale" in course_type:
-        bg_color = (250, 115, 67)       # Arancione Unicam
-        text_primary = (255, 255, 255)  # Bianco per scritte normali
-        accent_color = (255, 255, 255)  # Bianco per Titoli ed evidenziazioni
-        btn_bg = (255, 255, 255)        # Bianco per la casella del link
-        btn_text = (19, 19, 19)         # Nero per il testo del link all'interno del box
-    else:
-        bg_color = (23, 57, 131)
-        text_primary = (255, 255, 255)
-        accent_color = (0, 255, 102)
-        btn_bg = (0, 255, 102)
-        btn_text = (19, 19, 19)
-
-    canvas = Image.new("RGBA", (width, height), bg_color + (255,))
-    
-    # 2. Watermark Mascotte / Rubrica (Scala calibrata e padding di sicurezza a destra)
-    selected_asset = text_content.get("selected_asset", "")
-    asset_path = ""
-    is_rubric = False
-
-    if selected_asset:
-        for sub in ["rubrics", "mascots"]:
-            p = os.path.join(assets_dir, sub, selected_asset)
-            if os.path.exists(p):
-                asset_path = p
-                if sub == "rubrics":
-                    is_rubric = True
-                break
-                
-    if not asset_path and os.path.exists(os.path.join(assets_dir, "mascots")):
-        m_files = [f for f in os.listdir(os.path.join(assets_dir, "mascots")) if f.lower().endswith(('.png', '.jpg'))]
-        if m_files:
-            asset_path = os.path.join(assets_dir, "mascots", m_files[0])
-
-    if asset_path and os.path.exists(asset_path):
-        try:
-            watermark = Image.open(asset_path).convert("RGBA")
-            aspect = watermark.height / watermark.width
-
-            if is_rubric:
-                wm_w = int(width * 0.40)
-                wm_h = int(wm_w * aspect)
-                wm_x = int(width - wm_w - (width * 0.05))
-                wm_y = int(height * 0.48)
-                opacity = 0.22
-            else:
-                wm_w = int(width * 0.44)
-                wm_h = int(wm_w * aspect)
-                wm_x = int(width - wm_w - (width * 0.06))
-                wm_y = int(height - wm_h - (height * 0.10))
-                opacity = 0.25
-
-            watermark = watermark.resize((wm_w, wm_h), Image.Resampling.LANCZOS)
-            
-            r, g, b, a = watermark.split()
-            a = a.point(lambda p: int(p * opacity))
-            watermark.putalpha(a)
-            
-            canvas.paste(watermark, (wm_x, wm_y), watermark)
-        except Exception:
-            pass
-
-    # 3. Logo con switch dinamico per Computer Science
-    if "computer science" in course_type or "magistrale" in course_type:
-        target_logo_fn = "Logotipo UI Black - Green.png"
-    else:
-        target_logo_fn = brand_config.get("brand_assets", {}).get("core_branding", {}).get("main_logo", {}).get("file_name", "logo_unicamente.png")
-
-    logo_path = os.path.join(assets_dir, "logos", target_logo_fn)
-    if not os.path.exists(logo_path) and os.path.exists(os.path.join(assets_dir, "logos")):
-        l_files = [f for f in os.listdir(os.path.join(assets_dir, "logos")) if f.lower().endswith(('.png', '.jpg'))]
-        if l_files:
-            logo_path = os.path.join(assets_dir, "logos", l_files[0])
-
-    if os.path.exists(logo_path):
-        try:
-            logo_img = Image.open(logo_path).convert("RGBA")
-            logo_w = int(width * 0.44)
-            aspect = logo_img.height / logo_img.width
-            logo_h = int(logo_w * aspect)
-            logo_img = logo_img.resize((logo_w, logo_h), Image.Resampling.LANCZOS)
-            logo_x = (width - logo_w) // 2
-            logo_y = int(height * 0.05)
-            canvas.paste(logo_img, (logo_x, logo_y), logo_img)
-        except Exception:
-            pass
-
-    # 4. Tipografia & Layout Testuale
-    draw = ImageDraw.Draw(canvas)
-    font_bold_path = os.path.join(assets_dir, "fonts", "Sora-Bold copia.ttf")
-    if not os.path.exists(font_bold_path):
-        font_bold_path = os.path.join(assets_dir, "fonts", "Sora-Bold.ttf")
-
-    pad_x = int(width * 0.08)
-    curr_y = int(height * 0.18)
-
-    # Titolo
-    title_text = text_content.get("title", "")
-    if title_text:
-        title_font = get_font(font_bold_path, int(width * 0.058))
-        for line in wrap_text(title_text, max_chars=22):
-            draw.text((pad_x, curr_y), line, fill=accent_color, font=title_font)
-            curr_y += int(width * 0.072)
-        curr_y += int(height * 0.025)
-
-    # Sottotitolo
-    sub_text = text_content.get("subtitle_or_cta", "")
-    if sub_text:
-        sub_font = get_font(font_bold_path, int(width * 0.038))
-        for line in wrap_text(sub_text, max_chars=32):
-            draw.text((pad_x, curr_y), line, fill=text_primary, font=sub_font)
-            curr_y += int(width * 0.052)
-        curr_y += int(height * 0.035)
-
-    # Blocco 1
-    l1_name = text_content.get("label_1_name", "")
-    l1_val = text_content.get("label_1_val", "")
-    if l1_name and l1_val:
-        lbl_head_font = get_font(font_bold_path, int(width * 0.026))
-        lbl_val_font = get_font(font_bold_path, int(width * 0.040))
-        draw.text((pad_x, curr_y), l1_name.upper(), fill=accent_color, font=lbl_head_font)
-        curr_y += int(width * 0.042)
-        for line in wrap_text(l1_val, max_chars=32):
-            draw.text((pad_x, curr_y), line, fill=text_primary, font=lbl_val_font)
-            curr_y += int(width * 0.052)
-        curr_y += int(height * 0.025)
-
-    # Blocco 2
-    l2_name = text_content.get("label_2_name", "")
-    l2_val = text_content.get("label_2_val", "")
-    if l2_name and l2_val:
-        lbl_head_font = get_font(font_bold_path, int(width * 0.026))
-        lbl_val_font = get_font(font_bold_path, int(width * 0.040))
-        draw.text((pad_x, curr_y), l2_name.upper(), fill=accent_color, font=lbl_head_font)
-        curr_y += int(width * 0.042)
-        for line in wrap_text(l2_val, max_chars=32):
-            draw.text((pad_x, curr_y), line, fill=text_primary, font=lbl_val_font)
-            curr_y += int(width * 0.052)
-        curr_y += int(height * 0.025)
-
-    # Pulsante CTA
-    btn_text_val = text_content.get("button_text", "")
-    if btn_text_val:
-        btn_w = int(width * 0.84)
-        btn_h = int(height * 0.070)
-        btn_x = (width - btn_w) // 2
-        btn_y = int(height - btn_h - (height * 0.055))
-        radius = int(btn_h * 0.24)
-
-        top_lbl_font = get_font(font_bold_path, int(width * 0.028))
-        raw_top = text_content.get("subtitle_or_cta", "").lower()
-        if "bando" in raw_top or "erasmus" in raw_top:
-            top_lbl_text = "CONSULTA IL BANDO E CANDIDATI ONLINE:"
-        elif "registra" in str(text_content).lower() or "seminario" in str(text_content).lower():
-            top_lbl_text = "REGISTRATI ONLINE AL LINK:"
-        else:
-            top_lbl_text = "CONSULTA IL LINK UFFICIALE:"
-            
-        draw.text((width // 2, btn_y - int(height * 0.025)), top_lbl_text, fill=accent_color, font=top_lbl_font, anchor="mm")
-
-        draw.rounded_rectangle([btn_x, btn_y, btn_x + btn_w, btn_y + btn_h], radius=radius, fill=btn_bg)
-
-        clean_url = re.sub(r'^https?://', '', btn_text_val).upper()
-        btn_font_size = int(width * 0.033)
-        if len(clean_url) > 32:
-            btn_font_size = int(width * 0.026)
-        if len(clean_url) > 42:
-            btn_font_size = int(width * 0.021)
-        btn_font = get_font(font_bold_path, btn_font_size)
-        draw.text((width // 2, btn_y + (btn_h // 2)), clean_url, fill=btn_text, font=btn_font, anchor="mm")
-
-    return canvas.convert("RGB")
 
 st.set_page_config(
     page_title="@unicamente_informatica Studio - Multimodal Platform",
@@ -386,7 +162,7 @@ with st.sidebar:
             st.session_state["generated_output"] = None
             st.session_state["chat_history"] = []
             st.rerun()
-    st.caption("CoreBrand Studio Engine v1.6.0 © 2026")
+    st.caption("CoreBrand Studio Engine v1.7.0 © 2026")
 
 
 # ==========================================
@@ -466,12 +242,12 @@ REGOLE DI LINGUA E FORMATO (RIGIDISSIME):
 Per ciascuna delle 3 idee proponi questa struttura esatta in Markdown:
 
 ### Idea [N]: [Titolo sintetico dell'Idea in Italiano]
-* **Target e Bisogno:** Spiega in italiano a quale persona ti rivolgi e quale suo dubbio o paura affronta.
-* **Fase del Funnel:** Indica la fase in italiano e l'obiettivo.
-* **Piattaforma e Formato Consigliato:** Formato in italiano (es. Reel, Post Carosello, Storie).
-* **Concept Visivo:** Descrivi in italiano cosa mostrare nel video o nella grafica.
-* **Proposta di Copywriting e Gancio:** La frase di apertura (hook) e l'angolo del testo in italiano.
-* **Punti di Forza UNICAM da evidenziare:** Punti chiave in italiano (es. Posizione CENSIS, interviste fuori sede, vita da studente, comunità, tutorato).
+- **Target e Bisogno:** Spiega in italiano a quale persona ti rivolgi e quale suo dubbio o paura affronta.
+- **Fase del Funnel:** Indica la fase in italiano e l'obiettivo.
+- **Piattaforma e Formato Consigliato:** Formato in italiano (es. Reel, Post Carosello, Storie).
+- **Concept Visivo:** Descrivi in italiano cosa mostrare nel video o nella grafica.
+- **Proposta di Copywriting e Gancio:** La frase di apertura (hook) e l'angolo del testo in italiano.
+- **Punti di Forza UNICAM da evidenziare:** Punti chiave in italiano (es. Posizione CENSIS, interviste fuori sede, vita da studente, comunità, tutorato).
 """
 
                         final_brainstorm_prompt = f"""
@@ -486,8 +262,8 @@ Funnel Stages desiderati: {', '.join(funnel_stage_select)}
 Genera 3 idee di contenuti originali, chiare e immediatamente operative per il team Social Media.
 """
                         ideas_output = generate_social_post(
-                        system_prompt=brainstorm_system_prompt,
-                        user_prompt=final_brainstorm_prompt
+                            system_prompt=brainstorm_system_prompt,
+                            user_prompt=final_brainstorm_prompt
                         )
 
                         st.success("✨ Strategic content ideas generated successfully!")
@@ -576,9 +352,15 @@ Genera 3 idee di contenuti originali, chiare e immediatamente operative per il t
                                 visual_asset_source = few_shot_results[0].metadata["visual_asset_path"]
                         
                         retrieved_context_str = ""
+                        visual_guidelines_str = ""
                         for doc, score in retrieved_results:
-                            retrieved_context_str += f"## CATEGORIA: {doc.metadata.get('category').upper()}\n"
+                            cat = doc.metadata.get('category', '').lower()
+                            retrieved_context_str += f"## CATEGORIA: {cat.upper()}\n"
                             retrieved_context_str += f"[Fonte: {doc.metadata.get('source_file')}]: {doc.page_content}\n\n"
+                            
+                            # Raccogliamo indicazioni specifiche per il layout grafico da rubriche, voice e tone
+                            if cat in ["rubriche", "social_media_voice", "tone_of_voice"]:
+                                visual_guidelines_str += f"[{cat.upper()}]: {doc.page_content}\n"
                         
                         brand_config = load_brand_configuration()
                         
@@ -664,8 +446,8 @@ Catalogo semantico Asset Visivi:
 Rispondi ESCLUSIVAMENTE con il JSON valido.
 """
                             raw_extracted = generate_social_post(
-                            system_prompt="Sei un parser JSON rigoroso ed oggettivo in lingua italiana.", 
-                            user_prompt=extraction_prompt
+                                system_prompt="Sei un parser JSON rigoroso ed oggettivo in lingua italiana.", 
+                                user_prompt=extraction_prompt
                             )
                             
                             try:
@@ -965,9 +747,9 @@ Rispondi ESCLUSIVAMENTE con il JSON valido.
                             )
                             
                             raw_post = generate_social_post(
-                            system_prompt=system_prompt, 
-                            user_prompt=final_user_prompt
-                        )
+                                system_prompt=system_prompt, 
+                                user_prompt=final_user_prompt
+                            )
                             post_generato = clean_generated_post(raw_post)
 
                             course_type = "Informatica"
@@ -989,18 +771,6 @@ Rispondi ESCLUSIVAMENTE con il JSON valido.
                                 "course_type": course_type
                             }
 
-                            immagine_finale = compose_final_graphic(
-                                background_img=None, 
-                                text_content=graphic_data,
-                                channel_name=selected_channel.lower(),
-                                brand_config=brand_config,
-                                canvas_size=(canvas_width, canvas_height)
-                            )
-                            
-                            output_img_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "generated", "ui_output_post.jpg")
-                            os.makedirs(os.path.dirname(output_img_path), exist_ok=True)
-                            immagine_finale.save(output_img_path, "JPEG", quality=95)
-
                             actual_logo_path = ""
                             logos_avail = get_asset_files("logos")
                             if logos_avail:
@@ -1014,18 +784,30 @@ Rispondi ESCLUSIVAMENTE con il JSON valido.
                                         actual_asset_path = test_p
                                         break
 
+                            # 1. GENERAZIONE SVG PRIMA DI QUALSIASI CONVERSIONE
                             svg_code = generate_brand_svg(
                                 text_content=graphic_data,
                                 channel_name=selected_channel.lower(),
                                 brand_config=brand_config,
                                 canvas_size=(canvas_width, canvas_height),
                                 logo_path=actual_logo_path,
-                                asset_path=actual_asset_path
+                                asset_path=actual_asset_path,
+                                visual_guidelines_context=visual_guidelines_str,
+                                use_ai_design=True
                             )
                             output_svg_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "generated", "ui_output_post.svg")
                             os.makedirs(os.path.dirname(output_svg_path), exist_ok=True)
                             with open(output_svg_path, "w", encoding="utf-8") as f_svg:
                                 f_svg.write(svg_code)
+
+                            # 2. CONVERSIONE DIRETTA SVG -> JPEG AD ALTA RISOLUZIONE TRAMITE CAIROSVG
+                            output_img_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "generated", "ui_output_post.png")
+                            cairosvg.svg2png(
+                                bytestring=svg_code.encode("utf-8"),
+                                write_to=output_img_path,
+                                output_width=canvas_width,
+                                output_height=canvas_height
+                            )
 
                             st.session_state["generated_output"] = {
                                 "post_text": post_generato,
@@ -1038,6 +820,7 @@ Rispondi ESCLUSIVAMENTE con il JSON valido.
                                 "char_count": len(post_generato),
                                 "max_allowed": format_details.get("max_characters", 2200),
                                 "visual_source": visual_asset_source,
+                                "visual_guidelines_str": visual_guidelines_str,
                                 "graphic_data": graphic_data,
                                 "actual_logo_path": actual_logo_path,
                                 "actual_asset_path": actual_asset_path
@@ -1059,16 +842,20 @@ Rispondi ESCLUSIVAMENTE con il JSON valido.
             
             st.success("✨ Multimodal post ready!")
             
-            col_output_text, col_output_visual = st.columns([4, 3])
+            # Griglia a due colonne: 55% Testo a sinistra, 45% Grafica a destra
+            col_output_text, col_output_visual = st.columns([5.5, 4.5], gap="large")
+            
+            # --- COLONNA SINISTRA: TESTO E METRICHE ---
             with col_output_text:
                 tab_preview, tab_copy = st.tabs(["👁️ Copy Preview", "📋 Quick Copy"])
                 with tab_preview:
                     st.markdown(out_data["post_text"])
                 with tab_copy:
-                    st.text_area("Copy clean text from here:", value=out_data["post_text"], height=250)
+                    st.text_area("Copy clean text from here:", value=out_data["post_text"], height=320)
                     
                 st.caption(f"📏 **Geometric Analysis:** `{out_data['char_count']}` characters (Format Limit: `{out_data['max_allowed']}`).")
                 
+            # --- COLONNA DESTRA: GRAFICA RIDIMENSIONATA E DOWNLOAD ---
             with col_output_visual:
                 if out_data.get("visual_source") and os.path.exists(out_data["visual_source"]):
                     st.markdown("##### 🔍 Historical Visual Reference:")
@@ -1076,17 +863,25 @@ Rispondi ESCLUSIVAMENTE con il JSON valido.
                     st.divider()
 
                 st.markdown("##### 🎨 Generated Graphic Card")
-                st.image(out_data["img_path"], use_container_width=True, caption=f"Auto-generated Layout in {out_data['format_name']}")
+                
+                # Visualizzazione dell'immagine limitata alla larghezza della colonna destra
+                if os.path.exists(out_data.get("img_path", "")):
+                    st.image(
+                        out_data["img_path"], 
+                        use_container_width=True, 
+                        caption=f"Layout rendered for {out_data['format_name']}"
+                    )
 
+                # Pulsanti di Download allineati sotto la card
                 c_down1, c_down2 = st.columns(2)
                 with c_down1:
-                    if os.path.exists(out_data["img_path"]):
+                    if os.path.exists(out_data.get("img_path", "")):
                         with open(out_data["img_path"], "rb") as file:
                             st.download_button(
-                                label="💾 Download JPEG",
+                                label="💾 Download PNG",
                                 data=file,
-                                file_name=f"brand_post_{out_data['format_name'].replace(' ', '_').lower()}.jpg",
-                                mime="image/jpeg",
+                                file_name=f"brand_post_{out_data['format_name'].replace(' ', '_').lower()}.png",
+                                mime="image/png",
                                 use_container_width=True,
                                 type="secondary"
                             )
@@ -1116,7 +911,6 @@ Rispondi ESCLUSIVAMENTE con il JSON valido.
             chat_instruction = st.chat_input("Es. 'Rendi il testo più coinvolgente per le storie e cambia l'orario alle 11:30' oppure 'Imposta lo sfondo per la laurea magistrale'")
 
             if chat_instruction:
-                # Aggiunge il messaggio utente allo storico
                 st.session_state["chat_history"].append({"role": "user", "content": chat_instruction})
                 with st.chat_message("user"):
                     st.markdown(chat_instruction)
@@ -1127,7 +921,7 @@ Rispondi ESCLUSIVAMENTE con il JSON valido.
                             current_post = out_data["post_text"]
                             current_graphic = out_data["graphic_data"]
 
-                            # 1. Recupero catalogo asset aggiornato per Llama 3
+                            # 1. Recupero catalogo asset aggiornato
                             asset_catalog = get_asset_descriptions()
                             catalog_str = json.dumps(asset_catalog, indent=2, ensure_ascii=False)
 
@@ -1180,9 +974,9 @@ Rispondi con un SINGOLO oggetto JSON valido:
 }}
 """
                             raw_reply = generate_social_post(
-                            system_prompt="Rispondi ESCLUSIVAMENTE con un JSON valido ben formato. Non aggiungere commenti discorsivi.",
-                            user_prompt=refinement_prompt
-                        )
+                                system_prompt="Rispondi ESCLUSIVAMENTE con un JSON valido ben formato. Non aggiungere commenti discorsivi.",
+                                user_prompt=refinement_prompt
+                            )
 
                             parsed_reply = None
                             try:
@@ -1202,13 +996,11 @@ Rispondi con un SINGOLO oggetto JSON valido:
                                 new_post = current_post
                                 asst_msg = "Modifica applicata."
 
-                            # Fallback euristico diretto se l'utente chiede esplicitamente di impostare il focus
                             focus_sub_match = re.search(r'(?:sotto\s+a\s+focus|al\s+posto\s+di\s+["\']?carriera|focus dell\'intervista[:\s]+)\s*["\']?([^"\'\n\.]+)["\']?', chat_instruction, re.IGNORECASE)
                             if focus_sub_match:
                                 new_graphic["label_1_name"] = "FOCUS DELL'INTERVISTA"
                                 new_graphic["label_1_val"] = focus_sub_match.group(1).strip().capitalize()
 
-                            # 2. Matching euristico di fallback per l'asset se il prompt cita una rubrica
                             chat_lower = normalize_token(chat_instruction)
                             for sub in ["rubrics", "mascots"]:
                                 folder = os.path.join(ASSETS_DIR, sub)
@@ -1220,7 +1012,6 @@ Rispondi con un SINGOLO oggetto JSON valido:
                                                 new_graphic["selected_asset"] = f
                                                 break
 
-                            # 3. Risoluzione fisica dinamica del nuovo asset_path
                             new_asset_name = new_graphic.get("selected_asset", "")
                             updated_asset_path = ""
                             if new_asset_name:
@@ -1233,29 +1024,29 @@ Rispondi con un SINGOLO oggetto JSON valido:
                             brand_cfg = load_brand_configuration()
                             c_w, c_h = out_data["canvas_size"]
 
-                            # 4. Rigenerazione Grafica Raster (JPEG)
-                            img_upd = compose_final_graphic(
-                                background_img=None,
-                                text_content=new_graphic,
-                                channel_name=out_data["channel_name"].lower(),
-                                brand_config=brand_cfg,
-                                canvas_size=(c_w, c_h)
-                            )
-                            img_upd.save(out_data["img_path"], "JPEG", quality=95)
-
-                            # 5. Rigenerazione Vettoriale (SVG) con il path aggiornato
+                            # 1. RIGENERAZIONE SVG PRIMA
                             svg_upd = generate_brand_svg(
                                 text_content=new_graphic,
                                 channel_name=out_data["channel_name"].lower(),
                                 brand_config=brand_cfg,
                                 canvas_size=(c_w, c_h),
                                 logo_path=out_data.get("actual_logo_path"),
-                                asset_path=updated_asset_path
+                                asset_path=updated_asset_path,
+                                visual_guidelines_context=out_data.get("visual_guidelines_str", ""),
+                                use_ai_design=True
                             )
                             with open(out_data["svg_path"], "w", encoding="utf-8") as f_svg:
                                 f_svg.write(svg_upd)
 
-                            # 6. Aggiornamento dello stato di sessione
+                            # 2. CONVERSIONE DIRETTA IN JPEG/PNG
+                            cairosvg.svg2png(
+                            bytestring=svg_upd.encode("utf-8"),
+                            write_to=out_data["img_path"],
+                            output_width=c_w,
+                            output_height=c_h
+                        )
+
+                            # 3. Aggiornamento dello stato di sessione
                             st.session_state["generated_output"]["post_text"] = new_post
                             st.session_state["generated_output"]["char_count"] = len(new_post)
                             st.session_state["generated_output"]["graphic_data"] = new_graphic
