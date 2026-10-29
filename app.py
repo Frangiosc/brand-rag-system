@@ -2,10 +2,23 @@ import streamlit as st
 import os
 import json
 import re
+import html
 import unicodedata
 import random
 import cairosvg
+import calendar
+from datetime import datetime
 from PIL import Image
+
+from src.calendar_manager import (
+    get_italian_holidays,
+    load_calendar_data,
+    add_post_to_date,
+    save_month_note,
+    get_month_note,
+    get_posts_for_date,
+    delete_post_from_date
+)
 
 # Backend core imports
 from src.ingestion import run_semantic_ingestion
@@ -141,6 +154,90 @@ if "generated_output" not in st.session_state:
 if "chat_history" not in st.session_state:
     st.session_state["chat_history"] = []
 
+if "cal_year" not in st.session_state:
+    st.session_state["cal_year"] = datetime.now().year
+
+if "cal_month" not in st.session_state:
+    st.session_state["cal_month"] = datetime.now().month
+
+# --- MODALE POPUP PER I DETTAGLI E L'INSERIMENTO POST NEL CALENDARIO ---
+@st.dialog("📅 Gestione Programmazione Giornaliera")
+def open_day_modal(selected_date_str: str, holiday_name: str = ""):
+    dt = datetime.strptime(selected_date_str, "%Y-%m-%d")
+    date_it_str = dt.strftime("%d/%m/%Y")
+    
+    st.subheader(f"Giorno: {date_it_str}")
+    if holiday_name:
+        st.info(f"🎉 **Festività:** {holiday_name}")
+        
+    existing_posts = get_posts_for_date(selected_date_str)
+    
+    st.markdown("##### 📌 Contenuti già programmati")
+    if existing_posts:
+        for idx, p in enumerate(existing_posts):
+            c_card, c_del = st.columns([5, 1])
+            with c_card:
+                st.markdown(
+                    f"""
+                    <div style="background-color: #F8F9FA; padding: 10px 14px; border-radius: 8px; border-left: 4px solid #173983; margin-bottom: 8px;">
+                        <b>{html.escape(p.get('title', ''))}</b><br>
+                        <span style="font-size: 0.85em; color: #555;">📱 {p.get('platform', '')} &nbsp;|&nbsp; 📐 {p.get('format', '')} &nbsp;|&nbsp; 🎯 Funnel: {p.get('funnel', '')}</span>
+                    </div>
+                    """,
+                    unsafe_allow_html=True
+                )
+            with c_del:
+                if st.button("🗑️", key=f"del_post_{selected_date_str}_{idx}", help="Elimina questo contenuto"):
+                    delete_post_from_date(selected_date_str, idx)
+                    st.success("Contenuto eliminato!")
+                    st.rerun()
+    else:
+        st.caption("Nessun contenuto programmato per questa data.")
+        
+    st.divider()
+    
+    with st.expander("➕ Aggiungi Nuovo Contenuto", expanded=len(existing_posts) == 0):
+        with st.form(f"form_add_{selected_date_str}"):
+            post_name = st.text_input("Titolo / Nome del Contenuto:", placeholder="Es. Annuncio Seminario UX Design")
+            
+            f_col1, f_col2 = st.columns(2)
+            with f_col1:
+                platform_choice = st.selectbox("Piattaforma:", ["Instagram", "LinkedIn", "Facebook", "TikTok", "YouTube"])
+                format_choice = st.selectbox("Formato:", [
+                    "Vertical (4:5)", 
+                    "Stories/Reels (9:16)", 
+                    "Square (1:1)", 
+                    "Horizontal (1.91:1)",
+                    "Carosello Multiplo",
+                    "Video Reel"
+                ])
+            with f_col2:
+                funnel_choice = st.selectbox("Obiettivo Funnel:", [
+                    "Awareness (Notorietà)", 
+                    "Consideration (Interesse)", 
+                    "Coinvolgimento (Community)", 
+                    "Fidelizzazione (Studenti Iscritti)"
+                ])
+            
+            notes = st.text_input("Note o dettagli copy (opzionale):")
+            
+            submit_btn = st.form_submit_button("Inserisci", type="primary", use_container_width=True)
+            if submit_btn:
+                if not post_name.strip():
+                    st.error("Inserisci il nome del contenuto prima di confermare!")
+                else:
+                    new_item = {
+                        "title": post_name.strip(),
+                        "platform": platform_choice,
+                        "format": format_choice,
+                        "funnel": funnel_choice,
+                        "notes": notes.strip(),
+                        "created_at": datetime.now().strftime("%Y-%m-%d %H:%M")
+                    }
+                    add_post_to_date(selected_date_str, new_item)
+                    st.success("Contenuto programmato caricato con successo!")
+                    st.rerun()
+
 # ==========================================
 # SIDEBAR
 # ==========================================
@@ -151,7 +248,11 @@ with st.sidebar:
     if st.button("✍️ Content Generation Workspace", use_container_width=True, type="primary" if st.session_state["current_page"] == "generation" else "secondary"):
         st.session_state["current_page"] = "generation"
         st.rerun()
-        
+
+    if st.button("📅 Editorial Calendar", use_container_width=True, type="primary" if st.session_state["current_page"] == "calendar" else "secondary"):
+        st.session_state["current_page"] = "calendar"
+        st.rerun()
+
     if st.button("🚀 Brand Workspace", use_container_width=True, type="primary" if st.session_state["current_page"] == "onboarding" else "secondary"):
         st.session_state["current_page"] = "onboarding"
         st.rerun()
@@ -358,7 +459,6 @@ Genera 3 idee di contenuti originali, chiare e immediatamente operative per il t
                             retrieved_context_str += f"## CATEGORIA: {cat.upper()}\n"
                             retrieved_context_str += f"[Fonte: {doc.metadata.get('source_file')}]: {doc.page_content}\n\n"
                             
-                            # Raccogliamo indicazioni specifiche per il layout grafico da rubriche, voice e tone
                             if cat in ["rubriche", "social_media_voice", "tone_of_voice"]:
                                 visual_guidelines_str += f"[{cat.upper()}]: {doc.page_content}\n"
                         
@@ -800,7 +900,7 @@ Rispondi ESCLUSIVAMENTE con il JSON valido.
                             with open(output_svg_path, "w", encoding="utf-8") as f_svg:
                                 f_svg.write(svg_code)
 
-                            # 2. CONVERSIONE DIRETTA SVG -> JPEG AD ALTA RISOLUZIONE TRAMITE CAIROSVG
+                            # 2. CONVERSIONE DIRETTA SVG -> PNG AD ALTA RISOLUZIONE TRAMITE CAIROSVG
                             output_img_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "generated", "ui_output_post.png")
                             cairosvg.svg2png(
                                 bytestring=svg_code.encode("utf-8"),
@@ -875,7 +975,7 @@ Rispondi ESCLUSIVAMENTE con il JSON valido.
                 # Pulsanti di Download allineati sotto la card
                 c_down1, c_down2 = st.columns(2)
                 with c_down1:
-                    if os.path.exists(out_data.get("img_path", "")):
+                    if os.path.exists(out_data["img_path"]):
                         with open(out_data["img_path"], "rb") as file:
                             st.download_button(
                                 label="💾 Download PNG",
@@ -1038,13 +1138,13 @@ Rispondi con un SINGOLO oggetto JSON valido:
                             with open(out_data["svg_path"], "w", encoding="utf-8") as f_svg:
                                 f_svg.write(svg_upd)
 
-                            # 2. CONVERSIONE DIRETTA IN JPEG/PNG
+                            # 2. CONVERSIONE DIRETTA IN PNG
                             cairosvg.svg2png(
-                            bytestring=svg_upd.encode("utf-8"),
-                            write_to=out_data["img_path"],
-                            output_width=c_w,
-                            output_height=c_h
-                        )
+                                bytestring=svg_upd.encode("utf-8"),
+                                write_to=out_data["img_path"],
+                                output_width=c_w,
+                                output_height=c_h
+                            )
 
                             # 3. Aggiornamento dello stato di sessione
                             st.session_state["generated_output"]["post_text"] = new_post
@@ -1061,7 +1161,204 @@ Rispondi con un SINGOLO oggetto JSON valido:
 
 
 # ==========================================
-# PAGINA 2: BRAND WORKSPACE
+# PAGINA 2: EDITORIAL CALENDAR (GRIGLIA A CASELLE)
+# ==========================================
+elif st.session_state["current_page"] == "calendar":
+    st.title("📅 Calendario Editoriale Social")
+    st.caption("Pianifica i contenuti per i canali di Informatica UNICAM, visualizza festività ed eventi chiave.")
+    st.divider()
+
+    # CSS dedicato per uniformare le caselle della griglia mensile
+    st.markdown("""
+        <style>
+        .day-box-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 6px;
+        }
+        .day-number {
+            font-size: 1.15em;
+            font-weight: 800;
+            color: #173983;
+        }
+        .holiday-tag {
+            background-color: #FFEBEE;
+            color: #D32F2F;
+            font-size: 0.72em;
+            font-weight: 700;
+            padding: 2px 6px;
+            border-radius: 4px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 100px;
+        }
+        .post-chip {
+            background-color: #EBF3FF;
+            border-left: 3px solid #173983;
+            color: #0E2352;
+            font-size: 0.76em;
+            font-weight: 600;
+            padding: 4px 6px;
+            border-radius: 4px;
+            margin-bottom: 4px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        </style>
+    """, unsafe_allow_html=True)
+
+    mesi_it = [
+        "", "Gennaio", "Febbraio", "Marzo", "Aprile", "Maggio", "Giugno",
+        "Luglio", "Agosto", "Settembre", "Ottobre", "Novembre", "Dicembre"
+    ]
+
+    c_year = st.session_state["cal_year"]
+    c_month = st.session_state["cal_month"]
+    year_month_key = f"{c_year}-{c_month:02d}"
+
+    # Barra di navigazione mese e Post-It laterale
+    top_col_nav, top_col_postit = st.columns([6, 4], gap="large")
+
+    with top_col_nav:
+        n_prev, n_title, n_next = st.columns([1.2, 3.6, 1.2])
+        with n_prev:
+            if st.button("◀ Mese Prec.", use_container_width=True):
+                if c_month == 1:
+                    st.session_state["cal_month"] = 12
+                    st.session_state["cal_year"] -= 1
+                else:
+                    st.session_state["cal_month"] -= 1
+                st.rerun()
+
+        with n_title:
+            st.markdown(
+                f"<h2 style='text-align: center; margin: 0; color: #173983; font-weight: 800;'>{mesi_it[c_month]} {c_year}</h2>", 
+                unsafe_allow_html=True
+            )
+
+        with n_next:
+            if st.button("Mese Succ. ▶", use_container_width=True):
+                if c_month == 12:
+                    st.session_state["cal_month"] = 1
+                    st.session_state["cal_year"] += 1
+                else:
+                    st.session_state["cal_month"] += 1
+                st.rerun()
+
+    with top_col_postit:
+        st.markdown(
+            """
+            <style>
+            .postit-card {
+                background: linear-gradient(135deg, #FFF9C4 0%, #FFF176 100%);
+                padding: 14px 18px;
+                border-radius: 8px;
+                box-shadow: 2px 4px 12px rgba(0,0,0,0.12);
+                border-left: 6px solid #FBC02D;
+                color: #263238;
+            }
+            </style>
+            """, 
+            unsafe_allow_html=True
+        )
+        
+        current_note = get_month_note(year_month_key)
+        
+        with st.expander(f"📌 Post-It Eventi Chiave ({mesi_it[c_month]})", expanded=True):
+            st.markdown(
+                f"""
+                <div class="postit-card">
+                    <b>🎯 Highlight del Mese (Seminari, Hackathon, Bandi):</b><br>
+                    <div style="margin-top: 4px; font-size: 0.9em; white-space: pre-wrap;">{html.escape(current_note) if current_note else '<i style="color:#777;">Nessun evento appuntato per questo mese.</i>'}</div>
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
+            new_note_input = st.text_area(
+                "Aggiorna gli eventi chiave del mese:",
+                value=current_note,
+                placeholder="Es. 10/12 Seminario UX, 15/12 Chiusura Bando Erasmus, Hackathon Dipartimento...",
+                key=f"note_area_{year_month_key}",
+                label_visibility="collapsed"
+            )
+            if st.button("💾 Salva sul Post-It", key=f"btn_save_note_{year_month_key}", use_container_width=True):
+                save_month_note(year_month_key, new_note_input.strip())
+                st.success("Post-it aggiornato!")
+                st.rerun()
+
+    st.write("")
+
+    # Calcolo dati calendario e festività
+    cal_data = load_calendar_data()
+    holidays = get_italian_holidays(c_year)
+    posts_by_date = cal_data.get("posts", {})
+
+    month_matrix = calendar.monthcalendar(c_year, c_month)
+    giorni_settimana = ["Lunedì", "Martedì", "Mercoledì", "Giovedì", "Venerdì", "Sabato", "Domenica"]
+
+    # Intestazione giorni della settimana
+    cols_h = st.columns(7)
+    for idx, d_name in enumerate(giorni_settimana):
+        with cols_h[idx]:
+            st.markdown(
+                f"<div style='text-align: center; font-weight: 700; color: #5A6A85; font-size: 0.9em; margin-bottom: 6px;'>{d_name}</div>", 
+                unsafe_allow_html=True
+            )
+
+    st.markdown("<hr style='margin-top: 0px; margin-bottom: 12px; border: none; border-top: 1px solid #E2E8F0;'>", unsafe_allow_html=True)
+
+    # Griglia a celle (Quadrati)
+    for week in month_matrix:
+        cols_day = st.columns(7)
+        for i, day in enumerate(week):
+            with cols_day[i]:
+                if day == 0:
+                    # Casella vuota fuori mese
+                    st.container(height=140, border=False)
+                else:
+                    date_key = f"{c_year}-{c_month:02d}-{day:02d}"
+                    holiday_name = holidays.get(date_key, "")
+                    day_posts = posts_by_date.get(date_key, [])
+                    
+                    # Contenitore a riquadro con altezza fissa
+                    with st.container(height=145, border=True):
+                        # Riga superiore: Numero del giorno e festività
+                        h_tag = f"<span class='holiday-tag' title='{html.escape(holiday_name)}'>🎉 {html.escape(holiday_name)}</span>" if holiday_name else ""
+                        st.markdown(
+                            f"""
+                            <div class="day-box-header">
+                                <span class="day-number">{day}</span>
+                                {h_tag}
+                            </div>
+                            """, 
+                            unsafe_allow_html=True
+                        )
+
+                        # Lista dei post dentro al riquadro
+                        if day_posts:
+                            for p in day_posts[:2]:
+                                p_title = html.escape(p.get("title", "Post"))
+                                p_plat = "IG" if "instagram" in p.get("platform", "").lower() else ("LI" if "linkedin" in p.get("platform", "").lower() else "Post")
+                                st.markdown(
+                                    f"<div class='post-chip' title='{p_title}'><b>[{p_plat}]</b> {p_title}</div>", 
+                                    unsafe_allow_html=True
+                                )
+                            if len(day_posts) > 2:
+                                st.caption(f"+ altri {len(day_posts) - 2}...")
+                        else:
+                            st.caption("—")
+
+                        # Pulsante per aprire la modale
+                        btn_label = f"📝 Gestisci ({len(day_posts)})" if day_posts else "➕ Aggiungi"
+                        if st.button(btn_label, key=f"btn_day_{date_key}", use_container_width=True):
+                            open_day_modal(date_key, holiday_name)
+
+
+# ==========================================
+# PAGINA 3: BRAND WORKSPACE
 # ==========================================
 elif st.session_state["current_page"] == "onboarding":
     st.title("🚀 Brand Workspace")
